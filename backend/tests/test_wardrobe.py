@@ -199,3 +199,31 @@ def test_oversized_upload_rejected(client: TestClient, monkeypatch: pytest.Monke
         headers=_auth(user),
     )
     assert resp.status_code == 413
+
+
+def test_save_image_streams_and_aborts_without_declared_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from io import BytesIO
+
+    from fastapi import HTTPException
+    from starlette.datastructures import Headers, UploadFile
+
+    from app.upload import save_image
+
+    monkeypatch.setenv("UPLOAD_MAX_MB", "1")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+
+    limit = 1 * 1024 * 1024
+    payload = BytesIO(b"x" * (limit + 1024))
+    upload = UploadFile(
+        file=payload,
+        size=None,
+        filename="big.jpg",
+        headers=Headers({"content-type": "image/jpeg"}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        save_image(upload)
+    assert exc.value.status_code == 413
+    assert list(tmp_path.iterdir()) == []

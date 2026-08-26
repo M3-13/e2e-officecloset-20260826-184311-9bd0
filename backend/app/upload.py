@@ -9,6 +9,7 @@ component ever reaches the filesystem.
 from __future__ import annotations
 
 import secrets
+from contextlib import suppress
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
@@ -48,7 +49,11 @@ def save_image(upload: UploadFile | None) -> str | None:
     """Validate an uploaded image and persist it, returning the stored filename.
 
     Returns ``None`` when no image was supplied. Raises 415 for a disallowed
-    MIME type and 413 when the declared or actual size exceeds the limit.
+    MIME type and 413 when the declared or actual size exceeds the limit. The
+    payload is streamed to disk in bounded chunks, so an upload whose total
+    size is not known up front (e.g. chunked transfer without Content-Length)
+    is aborted as soon as it passes the limit instead of being read into
+    memory first.
     """
     if upload is None:
         return None
@@ -67,18 +72,31 @@ def save_image(upload: UploadFile | None) -> str | None:
             detail=f"Upload exceeds the maximum size of {settings.upload_max_mb} MB",
         )
 
-    data = upload.file.read()
-    if len(data) > limit:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Upload exceeds the maximum size of {settings.upload_max_mb} MB",
-        )
-
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     filename = secrets.token_hex(16) + _EXTENSIONS[content_type]
-    (upload_dir / filename).write_bytes(data)
+    path = upload_dir / filename
+
+    total = 0
+    try:
+        with path.open("wb") as out:
+            while True:
+                chunk = upload.file.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds the maximum size of {settings.upload_max_mb} MB",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        with suppress(OSError):
+            path.unlink(missing_ok=True)
+        raise
+
     return filename
 
 
