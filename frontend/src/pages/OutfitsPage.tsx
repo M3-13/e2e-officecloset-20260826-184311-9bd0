@@ -1,11 +1,16 @@
+import { useCallback, useState } from "react";
+import OutfitCreator from "../components/OutfitCreator";
+import OutfitList from "../components/OutfitList";
+
 export default function OutfitsPage() {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
+
   return (
     <section className="page">
       <h1 className="page__title">Outfits</h1>
-      <p className="page__text">
-        Der Outfit-Creator und die Übersicht werden in einem eigenen Schritt
-        umgesetzt.
-      </p>
+      <OutfitCreator onSaved={reload} />
+      <OutfitList refreshKey={refreshKey} />
     </section>
   );
 }
